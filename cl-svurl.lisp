@@ -1,5 +1,5 @@
 ;;; lolh/cl-svurl --- SVURL in Common-Lisp      -*- mode:lisp; -*-
-;;; Time-stamp: <2021-12-15 17:02:45 lolh>
+;;; Time-stamp: <2021-12-16 08:26:49 lolh>
 
 
 ;;; Author: LOLH <email>
@@ -8,8 +8,12 @@
 ;;; Version: 0.1
 
 ;;; Commentary:
-;;; Save urls and jpegs using Common-Lisp
-;;; Usage: (lolh/cl-svurl:svurl-init [dir])
+;;; Save urls and jpegs using Common-Lisp.  Uses package :quri to parse URLs.
+;;; See https://github.com/fukamachi/quri
+;;; 7 URI components -- scheme, userinfo, host name, port, path, query, fragment
+
+;;; Usage:
+;;; (lolh/cl-svurl:svurl-init [dir])
 
 ;;; NOTE:
 ;;; This program requires CLOZURE COMMON-LISP, but it can be made portable
@@ -20,7 +24,9 @@
 ;;; Code:
 
 (defpackage :lolh/cl-svurl
-  (:use :common-lisp)
+  (:use
+   :common-lisp
+   :quri)
   (:export
    :svurl-init))
 (in-package :lolh/cl-svurl)
