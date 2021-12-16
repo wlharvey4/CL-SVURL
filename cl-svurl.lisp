@@ -1,5 +1,5 @@
 ;;; lolh/cl-svurl --- SVURL in Common-Lisp      -*- mode:lisp; -*-
-;;; Time-stamp: <2021-12-16 08:26:49 lolh>
+;;; Time-stamp: <2021-12-16 11:42:43 lolh>
 
 
 ;;; Author: LOLH <email>
@@ -14,6 +14,7 @@
 
 ;;; Usage:
 ;;; (lolh/cl-svurl:svurl-init [dir])
+;;; $ ccl -Qb -l cl-svurl.[lisp|.dx64fsl] -- [args...]
 
 ;;; NOTE:
 ;;; This program requires CLOZURE COMMON-LISP, but it can be made portable
@@ -25,12 +26,14 @@
 
 (defpackage :lolh/cl-svurl
   (:use
-   :common-lisp
-   :quri)
+   :common-lisp)
   (:export
    :svurl-init))
+(ql:quickload :quri :silent t)
 (in-package :lolh/cl-svurl)
 
+
+(defvar *CLARGS* CCL:*UNPROCESSED-COMMAND-LINE-ARGUMENTS*)
 
 (defvar *DEFAULT-DIR*
   (merge-pathnames
@@ -59,13 +62,18 @@ SAVED, USED, and ORIGINS hold lists of urls associated with the files."
   origins) ; LIST OF URLS
 
 
+(defun ucla ()
+  (princ "The command line arguments are: ")
+  (prin1 *CLARGS*))
+
+
 (defun svurl-init (&optional dir)
   "Initialize a new SVURL structure.
 Create a new structure; add files to it, then find duplicates."
   (let ((sv (make-svurl :dir (parse-namestring (or dir *DEFAULT-DIR*)))))
     (get-files sv)
     (sort-files-find-dups sv)
-    sv))
+    (prog2 (pprint sv) sv)))
 
 
 
@@ -165,5 +173,7 @@ f5 is original, f6, f7, f8 are duplicates of it."
         (pushnew d (cdr ls) :test #'string=) ; add another duplicate to it
 	(setf (svurl-dups sv) (acons o (list d) dups))))) ; else create it
     
- 
+
+(when *CLARGS* (ucla)(ccl:quit))
+
 ;;; lolh/cl-svurl ends here
