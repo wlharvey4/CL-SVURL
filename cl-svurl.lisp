@@ -1,5 +1,5 @@
 ;;; lolh/cl-svurl --- SVURL in Common-Lisp      -*- mode:lisp; -*-
-;;; Time-stamp: <2021-12-17 13:05:08 lolh>
+;;; Time-stamp: <2021-12-17 13:40:39 lolh>
 
 
 ;;; Author: LOLH <email>
@@ -112,11 +112,14 @@ Create a new structure; add files to it, then find duplicates."
   (handle-dups sv handle-dups)
   (dolist (fsz (svurl-files sv))
     (let ((file (pathname (file-sz-file fsz))))
-      (format t "rename-files ~s ~s~%"
-	      (merge-pathnames file (svurl-source sv))
-	      (merge-pathnames file (svurl-destination sv))))))
-      ;; (rename-files (merge-pathnames file source)
-      ;; 		    (merge-pathnames file destination)))))
+      (and
+       (ccl:copy-file (merge-pathnames file (svurl-source sv))
+		      (merge-pathnames file (svurl-destination sv)))
+       (delete-file (merge-pathnames file (svurl-source sv)))))))
+       ;; (format t "rename-file ~s ~s~%"
+       ;; 	       (merge-pathnames file (svurl-source sv))
+       ;; 	       (merge-pathnames file (svurl-destination sv)))))))
+
 
 
 
@@ -258,8 +261,8 @@ or deleted.  The dups slot is then nil'ed."
 	    (:move (and (ccl:copy-file sfile mfile)
 			;; rename-file does not work on attached /Volume
 			;; so am using ccl::copy-file and delete-file instead
-			(delete-file sfile)
-			(format t "~s renamed to ~s~%" sfile mfile)))
+			(delete-file sfile)))
+			;; (format t "~s renamed to ~s~%" sfile mfile)))
 	    (:delete (and (delete-file sfile)
 			  (format t "~s deleted~%" (namestring sfile)))))))))
   (setf (svurl-dups sv) nil))
