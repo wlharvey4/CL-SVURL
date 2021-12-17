@@ -1,5 +1,5 @@
 ;;; lolh/cl-svurl --- SVURL in Common-Lisp      -*- mode:lisp; -*-
-;;; Time-stamp: <2021-12-16 17:31:35 lolh>
+;;; Time-stamp: <2021-12-17 00:27:16 lolh>
 
 
 ;;; Author: LOLH <email>
@@ -29,7 +29,8 @@
   (:use
    :common-lisp)
   (:export
-   :svurl-init))
+   :svurl-init
+   :handle-dups))
 (ql:quickload :quri :silent t)
 (in-package :lolh/cl-svurl)
 
@@ -45,6 +46,11 @@
 (defconstant +DEFAULT-DESTINATION+
   (merge-pathnames
    (make-pathname :directory '(:absolute "Volumes" "Mt.Whitney" "Documents_from_Paddy" ".saved"))
+   *DEFAULT-PATHNAME-DEFAULTS*))
+
+(defconstant +DEFAULT-MOVEDUPS+
+  (merge-pathnames
+   (make-pathname :directory '(:absolute "Volumes" "Mt.Whitney" "Documents_from_Paddy" ".savedups"))
    *DEFAULT-PATHNAME-DEFAULTS*))
 
 
@@ -74,6 +80,7 @@ After a procedure has been run, will also hold a list of duplicate files DUPS.
 SAVED, USED, and ORIGINS hold lists of urls associated with the files."
   (source      +DEFAULT-SOURCE+)      ; PATHNAME
   (destination +DEFAULT-DESTINATION+) ; PATHNAME
+  (movedups    +DEFAULT-MOVEDUPS+)    ; PATHNAME
   files    ; LIST OF FILE-SZ STRUCTS
   sorted   ; LIST OF SORTED FILE-SZ STRUCTS
   dups     ; LIST OF FILE-NAMES
@@ -87,12 +94,13 @@ SAVED, USED, and ORIGINS hold lists of urls associated with the files."
   (prin1 *CLARGS*))
 
 
-(defun svurl-init (&optional source dest)
+(defun svurl-init (&key source destination movedups)
   "Initialize a new SVURL structure.
 Create a new structure; add files to it, then find duplicates."
   (let ((sv (make-svurl
-	     :source (parse-namestring (or (as-directory source) +DEFAULT-SOURCE+))
-	     :destination (parse-namestring (or (as-directory dest) +DEFAULT-DESTINATION+)))))
+	     :source (parse-namestring (if source (as-directory source) +DEFAULT-SOURCE+))
+	     :destination (parse-namestring (if destination (as-directory destination) +DEFAULT-DESTINATION+))
+	     :movedups (parse-namestring (if movedups (as-directory movedups) +DEFAULT-MOVEDUPS+)))))
     (get-files sv)
     (sort-files-find-dups sv)
     (prog2 (pprint sv) sv)))
@@ -198,6 +206,27 @@ f5 is original, f6, f7, f8 are duplicates of it."
 	(setf (svurl-dups sv) (acons o (list d) dups))))) ; else create it
     
 
+(defun handle-dups (sv how)
+  ":move or :delete the duplicate files in SV according to HOW.
+The duplicate files are either moved from source to movedups directory
+or deleted.  The dups slot is then nil'ed."
+  (let ((source (svurl-source sv))
+	(movedups (svurl-movedups sv)))
+    (dolist (files (svurl-dups sv))
+      (let ((ofile (car files)))
+	;; (format t "original file: ~s in ~s~%" ofile source)
+	(dolist (file (cdr files))
+	  (let* ((pfile (pathname file))
+		 (sfile (merge-pathnames pfile source))
+		 (mfile (merge-pathnames (concatenate 'string "[" ofile "]" file) movedups)))
+	    ;; (format t "working on files ~s and ~s~%" sfile mfile)
+	    (case how
+	      (:move (rename-file sfile mfile))
+	      (:delete (and (delete-file sfile)
+			    (format t "~s deleted~%" (namestring sfile))))))))))
+  (setf (svurl-dups sv) nil))
+
+    
 (when *CLARGS* (ucla)(ccl:quit))
 
 ;;; lolh/cl-svurl ends here
