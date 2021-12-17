@@ -1,5 +1,5 @@
 ;;; lolh/cl-svurl --- SVURL in Common-Lisp      -*- mode:lisp; -*-
-;;; Time-stamp: <2021-12-17 00:27:16 lolh>
+;;; Time-stamp: <2021-12-17 13:05:08 lolh>
 
 
 ;;; Author: LOLH <email>
@@ -22,6 +22,8 @@
 ;;; of using common-lisp's file-length function.  To make portable, use the
 ;;; trivial-file-size package instead.
 ;;; It also uses CCL:*UNPROCESSED-COMMAND-LINE-ARGUMENTS*.
+;;; Based upon a problem renaming a file onto an attached /Volumes drive,
+;;; am using unexported ccl::copy-file function.
 
 ;;; Code:
 
@@ -30,7 +32,7 @@
    :common-lisp)
   (:export
    :svurl-init
-   :handle-dups))
+   :svurl-move-files))
 (ql:quickload :quri :silent t)
 (in-package :lolh/cl-svurl)
 
@@ -91,7 +93,7 @@ SAVED, USED, and ORIGINS hold lists of urls associated with the files."
 
 (defun ucla ()
   (princ "The command line arguments are: ")
-  (prin1 *CLARGS*))
+  (prin1 +CLARGS+))
 
 
 (defun svurl-init (&key source destination movedups)
@@ -106,6 +108,15 @@ Create a new structure; add files to it, then find duplicates."
     (prog2 (pprint sv) sv)))
 
 
+(defun svurl-move-files (sv &key (handle-dups :move))
+  (handle-dups sv handle-dups)
+  (dolist (fsz (svurl-files sv))
+    (let ((file (pathname (file-sz-file fsz))))
+      (format t "rename-files ~s ~s~%"
+	      (merge-pathnames file (svurl-source sv))
+	      (merge-pathnames file (svurl-destination sv))))))
+      ;; (rename-files (merge-pathnames file source)
+      ;; 		    (merge-pathnames file destination)))))
 
 
 
@@ -142,9 +153,19 @@ counting its bytes manually.  Returns NIL if file is not found. From CCL manual:
 This uses a quicksort algorithm, modified to report duplicates."
   (labels ((qs (ls &aux (pivot (car ls)))
 	     (if (cdr ls)
-		 (nconc (qs (remove-if-not #'(lambda (fsz) (minusp (file-sz-cmp fsz pivot sv))) ls))
-		        (remove-if-not #'(lambda (fsz) (zerop  (file-sz-cmp fsz pivot sv))) ls)
-			(qs (remove-if-not #'(lambda (fsz) (plusp  (file-sz-cmp fsz pivot sv))) ls)))
+		 ;; NOTE: file-sz-cmp removes duplicates from svurl-files slot
+		 ;; in the middle of sorting, but it appears to be okay because
+		 ;; sort-files-find-dups creates a local copy of sv to start as
+		 ;; the ls parameter of qs.
+		 (nconc
+		  (qs
+		   (remove-if-not
+		    #'(lambda (fsz) (minusp (file-sz-cmp fsz pivot sv))) ls))
+		  (remove-if-not
+		   #'(lambda (fsz) (zerop  (file-sz-cmp fsz pivot sv))) ls)
+		  (qs
+		   (remove-if-not
+		    #'(lambda (fsz) (plusp  (file-sz-cmp fsz pivot sv))) ls)))
 		 ls)))
     (setf (svurl-sorted sv) (qs (svurl-files sv)))))
 
@@ -165,6 +186,8 @@ Return 0 if the two are identical, or -1 if not."
 	    (if (eq fsz pivot)
 		0
 		(if (file-sz-byte-cmp fsz pivot sv)
+		    ;; NOTE: process-dups modifies svurl-files slot of sv
+		    ;; by deleting the duplicate in the middle of sorting
 		    (prog1 0 (process-dups fsz pivot sv))
 		    -1))))))
 
@@ -173,8 +196,12 @@ Return 0 if the two are identical, or -1 if not."
   "Compare equally-sized files to determine if they are duplicates.
 Return T if the files are duplicates, or NIL if not."
   (let ((dir (svurl-source sv)))
-    (with-open-file (s1 (merge-pathnames (pathname (file-sz-file fsz1)) dir) :element-type '(unsigned-byte 8))
-      (with-open-file (s2 (merge-pathnames (pathname (file-sz-file fsz2)) dir) :element-type '(unsigned-byte 8))
+    (with-open-file
+	(s1 (merge-pathnames (pathname (file-sz-file fsz1)) dir)
+	    :element-type '(unsigned-byte 8))
+      (with-open-file
+	  (s2 (merge-pathnames (pathname (file-sz-file fsz2)) dir)
+	      :element-type '(unsigned-byte 8))
 	(loop
 	  for b1 = (read-byte s1 nil)
 	  and b2 = (read-byte s2 nil)
@@ -193,17 +220,27 @@ duplicate with an earlier mod time.
 f1 is original, f2, f3, f4 are duplicates of it.
 f5 is original, f6, f7, f8 are duplicates of it."
 
-  (let* ((dups (svurl-dups sv))
-	 (f (file-sz-file fsz))   ; file being compared
+  (let* ((dups (svurl-dups sv))   ; alist of dup files
+	 (files (svurl-files sv)) ; list of files
 	 (ft (file-sz-mod fsz))   ; mod time file
-	 (p (file-sz-file pivot)) ; pivot file
 	 (pt (file-sz-mod pivot)) ; mod time pivot file
-	 (o (if (< ft pt) f p))   ; original file (earlier mod time)
-	 (d (if (> ft pt) f p))   ; duplicate file (later mod time)
-	 (ls (assoc o dups :test #'string=))) ; list of dups for original
+	 (o (if (< ft pt) fsz pivot))   ; original file-sz (earlier mod time)
+	 (d (if (> ft pt) fsz pivot))   ; duplicate file-sz (later mod time)
+	 (ls ; list of dups for original; might not exist yet
+	   (assoc (file-sz-file o) dups :test #'string=)))
     (if (consp ls) ; if list of dups for original already exists
-        (pushnew d (cdr ls) :test #'string=) ; add another duplicate to it
-	(setf (svurl-dups sv) (acons o (list d) dups))))) ; else create it
+        (pushnew   ; add another duplicate to it
+	 (file-sz-file d)
+	 (cdr ls)
+	 :test #'string=)
+	(setf (svurl-dups sv) ; else create new duplicate set
+	      (acons
+	       (file-sz-file o)
+	       (list (file-sz-file d)) dups)))
+    (setf (svurl-files sv) ; removing the duplicates from svurl-files in the
+			   ; middle of sorting seems to work because a copy is
+			   ; being used to sort
+	  (remove d files))))
     
 
 (defun handle-dups (sv how)
@@ -213,20 +250,21 @@ or deleted.  The dups slot is then nil'ed."
   (let ((source (svurl-source sv))
 	(movedups (svurl-movedups sv)))
     (dolist (files (svurl-dups sv))
-      (let ((ofile (car files)))
-	;; (format t "original file: ~s in ~s~%" ofile source)
-	(dolist (file (cdr files))
-	  (let* ((pfile (pathname file))
-		 (sfile (merge-pathnames pfile source))
-		 (mfile (merge-pathnames (concatenate 'string "[" ofile "]" file) movedups)))
-	    ;; (format t "working on files ~s and ~s~%" sfile mfile)
-	    (case how
-	      (:move (rename-file sfile mfile))
-	      (:delete (and (delete-file sfile)
-			    (format t "~s deleted~%" (namestring sfile))))))))))
+      (dolist (file (cdr files))
+	(let* ((pfile (pathname file))
+	       (sfile (merge-pathnames pfile source))
+	       (mfile (merge-pathnames pfile movedups)))
+	  (case how
+	    (:move (and (ccl:copy-file sfile mfile)
+			;; rename-file does not work on attached /Volume
+			;; so am using ccl::copy-file and delete-file instead
+			(delete-file sfile)
+			(format t "~s renamed to ~s~%" sfile mfile)))
+	    (:delete (and (delete-file sfile)
+			  (format t "~s deleted~%" (namestring sfile)))))))))
   (setf (svurl-dups sv) nil))
 
     
-(when *CLARGS* (ucla)(ccl:quit))
+(when +CLARGS+ (ucla)(ccl:quit))
 
 ;;; lolh/cl-svurl ends here
