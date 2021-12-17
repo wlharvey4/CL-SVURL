@@ -1,5 +1,5 @@
 ;;; lolh/cl-svurl --- SVURL in Common-Lisp      -*- mode:lisp; -*-
-;;; Time-stamp: <2021-12-16 11:42:43 lolh>
+;;; Time-stamp: <2021-12-16 17:02:30 lolh>
 
 
 ;;; Author: LOLH <email>
@@ -21,6 +21,7 @@
 ;;; with a small amount of work.  It relies upon CCL:FILE-DATA-SIZE instead
 ;;; of using common-lisp's file-length function.  To make portable, use the
 ;;; trivial-file-size package instead.
+;;; It also uses CCL:*UNPROCESSED-COMMAND-LINE-ARGUMENTS*.
 
 ;;; Code:
 
@@ -33,12 +34,29 @@
 (in-package :lolh/cl-svurl)
 
 
-(defvar *CLARGS* CCL:*UNPROCESSED-COMMAND-LINE-ARGUMENTS*)
+(defconstant +CLARGS+ CCL:*UNPROCESSED-COMMAND-LINE-ARGUMENTS*)
 
-(defvar *DEFAULT-DIR*
+(defconstant +DEFAULT-SOURCE+
+  (merge-pathnames
+   (make-pathname :directory '(:relative "Downloads"))
+   (parse-namestring "~"))
+  "/Users/<name>/Downloads/")
+
+(defconstant +DEFAULT-DESTINATION+
   (merge-pathnames
    (make-pathname :directory '(:absolute "Volumes" "Mt.Whitney" "Documents_from_Paddy" ".saved"))
    *DEFAULT-PATHNAME-DEFAULTS*))
+
+
+(defun as-directory (s)
+  "Make sure s is a directory name, e.g., ends with /.
+Ignore nil and empty strings"
+  (if (or (null s)
+	  (string= s "")
+	  (string= s " ")
+	  (char= (elt s (1- (length s))) #\/))
+      s
+      (concatenate 'string s "/")))
 
 
 (defstruct file-sz
@@ -54,7 +72,8 @@ The files and sizes are in the form of an association list:
 ((file-name . file-size)...).
 After a procedure has been run, will also hold a list of duplicate files DUPS.
 SAVED, USED, and ORIGINS hold lists of urls associated with the files."
-  (dir *DEFAULT-DIR*) ; PATHNAME
+  (source      +DEFAULT-SOURCE+)      ; PATHNAME
+  (destination +DEFAULT-DESTINATION+) ; PATHNAME
   files    ; LIST OF FILE-SZ STRUCTS
   dups     ; LIST OF FILE-NAMES
   saved    ; LIST OF URLS
@@ -67,10 +86,12 @@ SAVED, USED, and ORIGINS hold lists of urls associated with the files."
   (prin1 *CLARGS*))
 
 
-(defun svurl-init (&optional dir)
+(defun svurl-init (&optional source dest)
   "Initialize a new SVURL structure.
 Create a new structure; add files to it, then find duplicates."
-  (let ((sv (make-svurl :dir (parse-namestring (or dir *DEFAULT-DIR*)))))
+  (let ((sv (make-svurl
+	     :source (parse-namestring (or (as-directory source) +DEFAULT-SOURCE+))
+	     :destination (parse-namestring (or (as-directory dest) +DEFAULT-DESTINATION+)))))
     (get-files sv)
     (sort-files-find-dups sv)
     (prog2 (pprint sv) sv)))
@@ -83,7 +104,7 @@ Create a new structure; add files to it, then find duplicates."
 (defun get-files (sv)
   "Get the jp*g files present in the directory DIR of structure SVURL SV.
 Place them into slot FILES along with their sizes in bytes and mod times."
-  (let* ((d (svurl-dir sv))
+  (let* ((d (svurl-source sv))
 	 (fp1 (merge-pathnames (make-pathname :name :wild :type "jp*g") d))
 	 (fp2 (merge-pathnames (make-pathname :name :wild :type "JP*G") d))
 	 (fls (nconc
@@ -140,7 +161,7 @@ Return 0 if the two are identical, or -1 if not."
 (defun file-sz-byte-cmp (fsz1 fsz2 sv)
   "Compare equally-sized files to determine if they are duplicates.
 Return T if the files are duplicates, or NIL if not."
-  (let ((dir (svurl-dir sv)))
+  (let ((dir (svurl-source sv)))
     (with-open-file (s1 (merge-pathnames (pathname (file-sz-file fsz1)) dir) :element-type '(unsigned-byte 8))
       (with-open-file (s2 (merge-pathnames (pathname (file-sz-file fsz2)) dir) :element-type '(unsigned-byte 8))
 	(loop
