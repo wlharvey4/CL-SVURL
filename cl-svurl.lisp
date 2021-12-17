@@ -1,5 +1,5 @@
 ;;; lolh/cl-svurl --- SVURL in Common-Lisp      -*- mode:lisp; -*-
-;;; Time-stamp: <2021-12-16 17:02:30 lolh>
+;;; Time-stamp: <2021-12-16 17:31:35 lolh>
 
 
 ;;; Author: LOLH <email>
@@ -75,6 +75,7 @@ SAVED, USED, and ORIGINS hold lists of urls associated with the files."
   (source      +DEFAULT-SOURCE+)      ; PATHNAME
   (destination +DEFAULT-DESTINATION+) ; PATHNAME
   files    ; LIST OF FILE-SZ STRUCTS
+  sorted   ; LIST OF SORTED FILE-SZ STRUCTS
   dups     ; LIST OF FILE-NAMES
   saved    ; LIST OF URLS
   used     ; LIST OF URLS
@@ -133,11 +134,11 @@ counting its bytes manually.  Returns NIL if file is not found. From CCL manual:
 This uses a quicksort algorithm, modified to report duplicates."
   (labels ((qs (ls &aux (pivot (car ls)))
 	     (if (cdr ls)
-		 (nconc (qs (remove-if-not #'(lambda (fsz) (minusp (file-sz-cmp fsz pivot sv))) (cdr ls)))
-		        (remove-if-not #'(lambda (fsz) (zerop  (file-sz-cmp fsz pivot sv))) (cdr ls))
-			(qs (remove-if-not #'(lambda (fsz) (plusp  (file-sz-cmp fsz pivot sv))) (cdr ls))))
+		 (nconc (qs (remove-if-not #'(lambda (fsz) (minusp (file-sz-cmp fsz pivot sv))) ls))
+		        (remove-if-not #'(lambda (fsz) (zerop  (file-sz-cmp fsz pivot sv))) ls)
+			(qs (remove-if-not #'(lambda (fsz) (plusp  (file-sz-cmp fsz pivot sv))) ls)))
 		 ls)))
-    (qs (svurl-files sv))))
+    (setf (svurl-sorted sv) (qs (svurl-files sv)))))
 
 
 (defun file-sz-cmp (fsz pivot sv)
@@ -153,9 +154,11 @@ Return 0 if the two are identical, or -1 if not."
 	-1
 	(if (> sz1 sz2)
 	    1
-	    (if (file-sz-byte-cmp fsz pivot sv)
-		(prog1 0 (process-dups fsz pivot sv))
-		-1)))))
+	    (if (eq fsz pivot)
+		0
+		(if (file-sz-byte-cmp fsz pivot sv)
+		    (prog1 0 (process-dups fsz pivot sv))
+		    -1))))))
 
 
 (defun file-sz-byte-cmp (fsz1 fsz2 sv)
